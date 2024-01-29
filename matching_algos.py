@@ -6,7 +6,7 @@ class MatchIndex(object):
     def __init__(self, t, k):
         """Create index from all substrings of t of length k."""
         self.k = k  # k-mer length (k)
-        self.index = []
+        self.index = [] # list of (k-mer, index/offset) pairs
         for i in range(len(t) - k + 1):  # for each k-mer
             self.index.append((t[i:i+k], i))  # add (k-mer, offset) pair
         self.index.sort()  # sort index to facilitate binary search
@@ -25,23 +25,23 @@ class MatchIndex(object):
         return hits
     
 class SubseqIndex(object):
-    """ Holds a subsequence index for a text T """
+    """Holds a subsequence index for a text T."""
     
-    def __init__(self, t, k, ival):
-        """ Create index from all subsequences consisting of k characters
-            spaced ival positions apart.  E.g., SubseqIndex("ATAT", 2, 2)
-            extracts ("AA", 0) and ("TT", 1). """
+    def __init__(self, t, k, ind):
+        """Create index from all subsequences consisting of k characters
+        spaced ival positions apart.  E.g., SubseqIndex("ATAT", 2, 2)
+        extracts ("AA", 0) and ("TT", 1)."""
         self.k = k  # num characters per subsequence extracted
-        self.ival = ival  # space between them; 1=adjacent, 2=every other, etc
+        self.ind = ind  # space between them; 1=adjacent, 2=every other, etc
         self.index = []
-        self.span = 1 + ival * (k - 1)
-        for i in range(len(t) - self.span + 1):  # for each subseq
-            self.index.append((t[i:i+self.span:ival], i))  # add (subseq, offset)
+        self.span = 1 + self.ind * (k - 1)
+        for i in range(len(t) - self.span + 1):  # for each possible start index
+            self.index.append((t[i:i+self.span:self.ind], i))  # add (subseq, offset)
         self.index.sort()  # alphabetize by subseq
     
     def query(self, p):
-        """ Return index hits for first subseq of p """
-        subseq = p[:self.span:self.ival]  # query with first subseq
+        """Return index hits for first subseq of p."""
+        subseq = p[:self.span:self.ind]  # query with first subseq
         i = bisect.bisect_left(self.index, (subseq, -1))  # binary search
         hits = []
         while i < len(self.index):  # collect matching index entries
@@ -88,28 +88,31 @@ def index_approximate_match(p, t, t_index, n):
         end = (cod + 1) * segment_length
         segment = p[beg:end]
         
+        # binary search on segment
         i = bisect.bisect_left(t_index.index, (segment, -1))
-        
+
+        # tabulate matches based on hits on segment in index
         while i < len(t_index.index):
-            if segment != t_index.index[i][0]:
+            if segment != t_index.index[i][0]: # segment not in index
                 break
             else:
                 t_offset = t_index.index[i][1]
-                hits.append(t_offset)                    
-            i += 1            
-        
+                hits.append(t_offset) # add segment to hits               
+            i += 1 # check for repeats        
+     
+        # verification of matches (i.e. does full query string appear in t based on hits?)
         for h in hits:
             if beg > h or h-beg + len(p) > len(t):
                 continue
                 
-            errs = 0
-            for x in range(0, beg):
+            errs = 0 # tracks total number of mismatches
+            for x in range(0, beg): # check for mismatches prior to current segment
                 if p[x] != t[h-beg+x]:
                     errs += 1
                 if errs > n:
                     break
                     
-            for y in range(end, len(p)):
+            for y in range(end, len(p)): # check for mismatches in chars after segment
                 if p[y] != t[h-beg+y]:
                     errs += 1
                 if errs > n:
@@ -120,20 +123,20 @@ def index_approximate_match(p, t, t_index, n):
                                 
     return hits, list(all_match)
 
-def index_approximate_subseq_match(p, t, t_subseq_index, n):
+def index_approximate_subseq_match(p, t, t_subseq_index, n, span):
     """Compute approximate matches between query string and context string."""
     hits = []    
     for position in range(n):
-        subseq = p[position:][:22:3]
+        subseq = p[position:][:span:3]
         
         i = bisect.bisect_left(t_subseq_index.index, (subseq, -1))  # binary search
 
         while i < len(t_subseq_index.index):  # collect matching index entries
             if t_subseq_index.index[i][0] != subseq:
-                break
+                break # break on non-match
             hits.append(t_subseq_index.index[i][1])
             i += 1
-            
+    # contains approximate matches based on skipped-slice matching - still requires verification        
     return hits
 
 def editDistance(x, y):
@@ -164,7 +167,7 @@ def editDistance(x, y):
 
 # genome file
 # f = 'ERR037900_1.first1000.fastq'
-f = 'chr1.GRCh38.excerpt.fasta'
+f = 'raw_files/chr1.GRCh38.excerpt.fasta'
 genome = readGenome(f) # just take the first read
 
 # query string
@@ -179,7 +182,7 @@ print("Indices of approximate matches: ", hits)
 
 # Crete index of all three-mers contained in genome string
 t_subseq_index = SubseqIndex(genome, 8, 3)
-hits = index_approximate_subseq_match(p, genome, t_subseq_index, 2)
+hits = index_approximate_subseq_match(p, genome, t_subseq_index, 2, t_subseq_index.span)
 print("Indices of approximate matches for 3-mers: ", hits)
 
 d = editDistance(p, genome)
